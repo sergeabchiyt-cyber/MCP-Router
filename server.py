@@ -49,7 +49,7 @@ def db_usage() -> dict:
         "status": status,
     }
 
-# ── MCP Router ─────────────────────────────────────────────────────────────
+# ── MCP ────────────────────────────────────────────────────────────────────
 
 mcp = FastMCP("Hermes Router", host="0.0.0.0", port=PORT)
 
@@ -65,7 +65,7 @@ def db_write(query: str, params: str = "[]") -> str:
         return json.dumps({"ok": False, "error": "DB at 90%+ — archive required before writing", "db_usage": usage})
     try:
         conn = get_conn()
-        p = json.loads(params)
+        p = tuple(json.loads(params))
         conn.execute(query, p)
         conn.commit()
         usage = db_usage()
@@ -78,7 +78,7 @@ def db_read(query: str, params: str = "[]") -> str:
     """Execute a DB read query. Always returns current DB usage."""
     try:
         conn = get_conn()
-        p = json.loads(params)
+        p = tuple(json.loads(params))
         rows = conn.execute(query, p).fetchall()
         usage = db_usage()
         return json.dumps({"ok": True, "rows": rows, "db_usage": usage})
@@ -88,7 +88,10 @@ def db_read(query: str, params: str = "[]") -> str:
 @mcp.tool()
 def db_status() -> str:
     """Get current Turso DB usage stats."""
-    return json.dumps(db_usage())
+    try:
+        return json.dumps(db_usage())
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)})
 
 # ── Terminal proxy ──────────────────────────────────────────────────────────
 
@@ -109,20 +112,24 @@ def terminal(cmd: str, cwd: str = "/tmp/workspace", timeout: int = 300) -> str:
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)})
 
-# ── MCP health tool ─────────────────────────────────────────────────────────
+# ── Health ──────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 def health() -> str:
     """Router health check including DB status."""
-    usage = db_usage()
-    return json.dumps({"status": "ok", "db_usage": usage})
-
-# ── HTTP health endpoint (BetterStack / Render) ─────────────────────────────
+    try:
+        usage = db_usage()
+        return json.dumps({"status": "ok", "db_usage": usage})
+    except Exception as e:
+        return json.dumps({"status": "degraded", "error": str(e)})
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_http(request: Request) -> JSONResponse:
-    usage = db_usage()
-    return JSONResponse({"status": "ok", "db_usage": usage})
+    try:
+        usage = db_usage()
+        return JSONResponse({"status": "ok", "db_usage": usage})
+    except Exception as e:
+        return JSONResponse({"status": "degraded", "error": str(e)}, status_code=200)
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
